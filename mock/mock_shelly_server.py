@@ -36,6 +36,8 @@ class MockShellyDevice:
 		extra_components=None,
 		break_mac=False,
 		ws_close_after_method=None,
+		fault_methods=None,
+		fault_mode="error",
 	):
 		self.name = device_name
 		self.channel_name = channel_name
@@ -96,8 +98,10 @@ class MockShellyDevice:
 		self._meter_names = {}
 
 		# Test hooks: methods that return an error, and a log of (time, method) of calls over websocket.
-		self.faults = set()
-		self.fault_mode = "error"
+		# Mock.SetFaults sets these at runtime; the constructor arguments let a fault be in
+		# place before the driver's first connection, which runtime hooks cannot do.
+		self.faults = set(fault_methods or [])
+		self.fault_mode = fault_mode
 		self.fault_delay = 0.0
 		# Cleared while the device is frozen (see mock_freeze).
 		self.running = asyncio.Event()
@@ -1023,6 +1027,9 @@ def parse_args():
 		help="report an empty mac in Shelly.GetDeviceInfo")
 	parser.add_argument("--ws-close-after-method", default=None,
 		help="close the websocket right after answering this RPC method, e.g. Shelly.GetComponents")
+	parser.add_argument("--fault-methods", default="",
+		help="comma separated RPC methods to fail from startup, e.g. Temperature.GetStatus")
+	parser.add_argument("--fault-mode", default="error", choices=["error", "timeout", "delay"])
 	parser.add_argument("--verbose", action="store_true")
 	return parser.parse_args()
 
@@ -1057,6 +1064,8 @@ async def main():
 		extra_components=[c for c in args.extra_components.split(",") if c],
 		break_mac=args.break_mac,
 		ws_close_after_method=args.ws_close_after_method,
+		fault_methods=[m for m in args.fault_methods.split(",") if m],
+		fault_mode=args.fault_mode,
 	)
 
 	app = web.Application()

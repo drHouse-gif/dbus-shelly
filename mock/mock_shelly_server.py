@@ -35,6 +35,7 @@ class MockShellyDevice:
 		firmware_version="1.0.0",
 		extra_components=None,
 		break_mac=False,
+		ws_close_after_method=None,
 	):
 		self.name = device_name
 		self.channel_name = channel_name
@@ -46,6 +47,9 @@ class MockShellyDevice:
 		self.extra_components = list(extra_components or [])
 		# Report no mac at all in Shelly.GetDeviceInfo, to exercise the invalid-serial path.
 		self.break_mac = break_mac
+		# Test hook: close the websocket right after answering this RPC method, to land a
+		# drop at a known point in the driver's connect sequence.
+		self.ws_close_after_method = ws_close_after_method
 		self.switch_channels = switch_channels
 		self.voltage = float(voltage)
 		self.default_apower = float(apower)
@@ -967,6 +971,10 @@ async def ws_rpc_handler(request):
 			response = await handle_rpc(device, frame, verbose=request.app.get('verbose', False))
 			if response is not None:
 				await ws.send_json(response)
+			if device.ws_close_after_method and frame.get("method") == device.ws_close_after_method:
+				_vprint(request, f"mock ws closing after answering {device.ws_close_after_method}")
+				await ws.close()
+				break
 		elif msg.type == web.WSMsgType.ERROR:
 			break
 
@@ -1013,6 +1021,8 @@ def parse_args():
 		help="comma separated component keys the driver cannot handle, e.g. cover:0")
 	parser.add_argument("--break-mac", action="store_true",
 		help="report an empty mac in Shelly.GetDeviceInfo")
+	parser.add_argument("--ws-close-after-method", default=None,
+		help="close the websocket right after answering this RPC method, e.g. Shelly.GetComponents")
 	parser.add_argument("--verbose", action="store_true")
 	return parser.parse_args()
 
@@ -1046,6 +1056,7 @@ async def main():
 		firmware_version=args.firmware_version,
 		extra_components=[c for c in args.extra_components.split(",") if c],
 		break_mac=args.break_mac,
+		ws_close_after_method=args.ws_close_after_method,
 	)
 
 	app = web.Application()

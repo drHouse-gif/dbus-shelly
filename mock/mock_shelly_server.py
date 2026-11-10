@@ -33,6 +33,8 @@ class MockShellyDevice:
 		humidity_ids=(),
 		devicepower=False,
 		firmware_version="1.0.0",
+		extra_components=None,
+		break_mac=False,
 	):
 		self.name = device_name
 		self.channel_name = channel_name
@@ -40,6 +42,10 @@ class MockShellyDevice:
 		self.app = app
 		self.firmware_version = firmware_version
 		self.mac = mac.lower()
+		# Component keys the driver has no handler for, so a device can be made unsupported.
+		self.extra_components = list(extra_components or [])
+		# Report no mac at all in Shelly.GetDeviceInfo, to exercise the invalid-serial path.
+		self.break_mac = break_mac
 		self.switch_channels = switch_channels
 		self.voltage = float(voltage)
 		self.default_apower = float(apower)
@@ -120,7 +126,7 @@ class MockShellyDevice:
 		return {
 			"name": self.name,
 			"id": self.device_id,
-			"mac": self.mac,
+			"mac": ("" if self.break_mac else self.mac),
 			"model": self.model,
 			"app": self.app,
 			"gen": 2,
@@ -135,7 +141,7 @@ class MockShellyDevice:
 		return {
 			"name": self.name,
 			"id": self.device_id,
-			"mac": self.mac,
+			"mac": ("" if self.break_mac else self.mac),
 			"model": self.model,
 			"app": self.app,
 			"gen": 2,
@@ -229,6 +235,8 @@ class MockShellyDevice:
 		for key in self._lights:
 			kind, _, i = key.partition(":")
 			components.append({"key": key, "status": self.light_get_status(kind, {"id": int(i)}), "config": self.light_get_config(kind, {"id": int(i)})})
+		for key in self.extra_components:
+			components.append({"key": key, "status": {"id": int(key.split(":")[1]) if ":" in key else 0}, "config": {"id": 0}})
 		offset = int(params.get("offset", 0))
 		return {"components": components[offset:], "cfg_rev": 1, "offset": offset, "total": len(components)}
 
@@ -1001,6 +1009,10 @@ def parse_args():
 	parser.add_argument("--devicepower", action="store_true", help="Add a DevicePower component (battery-powered device)")
 	parser.add_argument("--notify-interval", type=float, default=5)
 	parser.add_argument("--firmware-version", default="1.0.0")
+	parser.add_argument("--extra-components", default="",
+		help="comma separated component keys the driver cannot handle, e.g. cover:0")
+	parser.add_argument("--break-mac", action="store_true",
+		help="report an empty mac in Shelly.GetDeviceInfo")
 	parser.add_argument("--verbose", action="store_true")
 	return parser.parse_args()
 
@@ -1032,6 +1044,8 @@ async def main():
 		humidity_ids=[int(i) for i in args.humidity_ids.split(",") if i],
 		devicepower=args.devicepower,
 		firmware_version=args.firmware_version,
+		extra_components=[c for c in args.extra_components.split(",") if c],
+		break_mac=args.break_mac,
 	)
 
 	app = web.Application()
